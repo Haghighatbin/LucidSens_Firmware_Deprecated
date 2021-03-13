@@ -1,0 +1,8 @@
+{
+    "name": "LucidSens",
+    "stubs": {},
+    "dev-packages": {
+        "micropy-cli": "*"
+    },
+    "packages": {}
+}
