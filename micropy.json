@@ -1,8 +1,13 @@
 {
     "name": "LucidSens",
-    "stubs": {},
+    "stubs": {
+        "esp32_LoBo-esp32_LoBo-3.2.24": "1.2.0"
+    },
     "dev-packages": {
         "micropy-cli": "*"
     },
-    "packages": {}
+    "packages": {},
+    "config": {
+        "pylint": true
+    }
 }

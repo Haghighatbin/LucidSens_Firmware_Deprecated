@@ -1,18 +1,19 @@
+import _thread
+import gc
+from array import array
+from display import TFT
+from network import WLAN, STA_IF
 from machine import Pin, ADC, PWM, RTC, DHT, stdin_get, stdout_put
+from utime import ticks_ms, ticks_diff, sleep, strftime, localtime
+from upysh import *
+import usocket as socket
+import ujson as json
+_thread.stack_size(3*4096)
+print('THREAD stack_size is: {}'.format(_thread.stack_size()))
 p14 = Pin(14, Pin.OUT, value=0)
 p15 = Pin(15, Pin.OUT, value=0)
 p5 = Pin(5, Pin.OUT, value=0)
 print('Pins 4, 14, 15 are all down now.')
-import network, sys, gc, _thread
-from display import TFT
-_thread.stack_size(3*4096)
-print('THREAD stack_size is: {}'.format(_thread.stack_size()))
-from utime import ticks_ms, ticks_diff, sleep_ms, sleep, strftime, localtime
-import usocket as socket
-from upysh import *
-import ujson as json
-from array import array
-
 # color codes
 green = '\033[92m'
 red = '\033[91m'
@@ -28,7 +29,6 @@ class testAsteroid:
         response.update({'body': [[(i, 0), (0, abs(abs(i) - n)), (0, -(abs(abs(i) - n)))] for i in range(-n, n + 1)]})
         jsnd_response = json.dumps(response)
         return jsnd_response
-
 class adcSampler:
     def __init__(self, pin):
         self.adc = ADC(pin)
@@ -63,11 +63,11 @@ class adcSampler:
         start_tot = ticks_ms()
         for _ in range(int(acquisition/intervals)):
             self.adc.collect(freq=frq, data=datapoint)
-            start = ticks_ms()
+            # start = ticks_ms()
             while True:
                 try:
                     if not self.adc.progress()[0]:
-                        end = ticks_ms()
+                        # end = ticks_ms()
                         true_val = self.adc.collected()[2]
                         calib_val = calibration(self.adc.collected()[2])
                         # print('{} ms took to collect one averaged data-point.'.format(ticks_diff(end, start)))
@@ -85,20 +85,21 @@ class adcSampler:
                     print(e)
                     break
         end_tot = ticks_ms()
-        # print('{} ms took to collect the true_set.'.format(ticks_diff(end_tot, start_tot)))
-        # print('true val: {}'.format(sum(true_set)/len(true_set)))
-        # print('calib val: {}'.format(sum(calib_set)/len(calib_set)))
+        print('{} ms took to collect the true_set.'.format(ticks_diff(end_tot, start_tot)))
+        print('true val: {}'.format(sum(true_set)/len(true_set)))
+        print('calib val: {}'.format(sum(calib_set)/len(calib_set)))
 
         return calib_set
 
     def deinit(self):
         self.adc.deinit()
         # return 'ADC module deinitialized.'
-
 class commandHandler:
     def __init__(self):
         self.clear = clear
+        self.stdout_put = stdout_put
         self.seg_size = 510
+        self.read = ''
 
     def read_until(self, ending, timeout=10000):
         try:
@@ -146,7 +147,7 @@ class commandHandler:
             if len(response) > self.seg_size:
                 # for idx, data in enumerate([chunk for chunk in chunker(response)]):
                 for data in ([chunk for chunk in chunker(response)]):
-                    self.machine.stdout_put(data)
+                    self.stdout_put(data)
                     sleep(1)
                     resp = self.read_until('#', 5000)
                     if 'EOF received.\n' in resp:
@@ -155,7 +156,7 @@ class commandHandler:
                         pass
                     else:
                         while True:
-                            self.machine.stdout_put(data)
+                            self.stdout_put(data)
                             sleep(1)
                             resp = self.read_until('#', 5000)
                             if 'EOF received.\n' in resp:
@@ -166,7 +167,7 @@ class commandHandler:
                                 sleep(2)
                                 pass
             else:
-                self.machine.stdout_put(response)
+                self.stdout_put(response)
                 sleep(2)
                 resp = self.read_until('#', 5000)
                 if 'EOF received.\n' in resp:
@@ -175,7 +176,7 @@ class commandHandler:
                     pass
                 else:
                     while True:
-                        self.machine.stdout_put(response)
+                        self.stdout_put(response)
                         sleep(1)
                         resp = self.read_until('#', 5000)
                         if 'got it!' in resp:
@@ -215,7 +216,6 @@ class commandHandler:
 
     def __str__(self):
         print("Operator class is activated.")
-
 class stprDRV8825:
     """ESP32 (PWM-based) Micropython class for DRV8825 stepper-motor driver.
 
@@ -320,7 +320,6 @@ class stprDRV8825:
                 self.pwr.value(0)
                 break
         return
-
 class scrST7735:
     def __init__(self):
         self.tft = TFT()
@@ -473,7 +472,6 @@ class scrST7735:
                 print('exception received!')
                 print(e)
                 break
-           
 class serialConnection:
     def __init__(self):
         self.read = ''
@@ -576,7 +574,6 @@ class serialConnection:
 
     def __str__(self):
         return "Serial connection is established."
-
 class wifiConnection:
     """
     ip = '192.168.0.95'
@@ -673,7 +670,7 @@ class wifiConnection:
 
     def wf_connection(self):
         counts = 0
-        station = network.WLAN(network.STA_IF)
+        station = WLAN(STA_IF)
         try:
             if station.isconnected():
                 print(station.ifconfig())
@@ -718,7 +715,7 @@ class wifiConnection:
             return station.isconnected()
 
     def wf_disconnect(self):
-        station = network.WLAN(network.STA_IF)
+        station = WLAN(STA_IF)
         station.disconnect()
         print("w_thread: wifi is not connected.")
         station.active(False)
@@ -741,7 +738,6 @@ class wifiConnection:
 
     def __str__(self):
         print("WiFiConn class is activated.")
-
 def main():
     # gc.enable()
     def gc_thrd():
@@ -808,7 +804,5 @@ def main():
     except Exception as e:
         print(e)
         print(red + 'main module interrupted.' + green)
-
-
 if __name__ == '__main__':
     main()
