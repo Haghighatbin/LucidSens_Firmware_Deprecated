@@ -8,12 +8,14 @@ from utime import ticks_ms, ticks_diff, sleep, strftime, localtime
 from upysh import *
 import usocket as socket
 import ujson as json
+
 _thread.stack_size(3*4096)
 print('THREAD stack_size is: {}'.format(_thread.stack_size()))
 p14 = Pin(14, Pin.OUT, value=0)
 p15 = Pin(15, Pin.OUT, value=0)
 p5 = Pin(5, Pin.OUT, value=0)
 print('Pins 4, 14, 15 are all down now.')
+
 # color codes
 green = '\033[92m'
 red = '\033[91m'
@@ -217,6 +219,7 @@ class commandHandler:
     def __str__(self):
         print("Operator class is activated.")
 class stprDRV8825:
+
     """ESP32 (PWM-based) Micropython class for DRV8825 stepper-motor driver.
 
     Example:
@@ -311,11 +314,13 @@ class stprDRV8825:
         stepper = Pin(self.step_pin, Pin.OUT)
         if not self.intrptr.value():
             self.pwr.value(0)
+            print("stepper has already been in point zero.")
             return
         while True:
             stepper.value(1)
             sleep(0.02)
             stepper.value(0)
+            print("stepper is moving to the point zero.")
             if not self.intrptr.value():
                 self.pwr.value(0)
                 break
@@ -469,7 +474,7 @@ class scrST7735:
                 print('Display aborted.')
                 break
             except Exception as e:
-                print('exception received!')
+                print('exception raised!')
                 print(e)
                 break
 class serialConnection:
@@ -525,7 +530,11 @@ class serialConnection:
                     self.signal = self.read_until('#')
 
                 if '!#' in self.signal:
-                    print('aborted by user.')
+                    print('s_thread: aborted by user.')
+                    print("attempting to close all the other threads.")
+                    _thread.notify(0, _thread.EXIT)
+                    sleep(5)
+                    _thread.list()
                     break
                 else:
                     stdout_put('got it!\n')
@@ -566,8 +575,8 @@ class serialConnection:
                     resp.close()
                     print('closed resp.\n')
             except KeyboardInterrupt:
-                print('Keyboard interrupt')
-                sys.exit(0)
+                print('Keyboard interrupt.')
+                break
             except Exception as e:
                 print(e)
                 break
@@ -575,17 +584,6 @@ class serialConnection:
     def __str__(self):
         return "Serial connection is established."
 class wifiConnection:
-    """
-    ip = '192.168.0.95'
-    port = 3175
-    subnet = '255.255.255.0'
-    gateway = '192.168.1.1'
-    dns = '208.67.222.222'
-    essid = 'TP-LINK_CFF1'
-    password = 'ecl534534'
-    essid = 'tplink'
-    password = 'Amin_3175!?$'
-    """
     def __init__(self):
         self.p_led = Pin(2, Pin.OUT)
         self.clear = clear
@@ -669,7 +667,6 @@ class wifiConnection:
                 break
 
     def wf_connection(self):
-        counts = 0
         station = WLAN(STA_IF)
         try:
             if station.isconnected():
@@ -679,37 +676,34 @@ class wifiConnection:
                 return station.isconnected()
 
             else:
+                print("w_thread: wifi was not connected.")
                 station.active(True)
-                print("w_thread: wifi has not been connected yet.")
                 sleep(3)
-                print("w_thread: scanning network...")
-
-                scanned = station.scan()
-                modified_scanned_list = [list(j for idx, j in enumerate(signal) if idx not in [1, 4, 6]) for signal in scanned]
-                header = ['ESSID', 'Channel', 'RSSI', 'AuthMode']
-                row_format = "|{:^30}|" * (len(header))
-                print(128 * '-')
-                print(row_format.format(*header))
-                print(128 * '-')
-                print('\n'.join(row_format.format(*row) for row in modified_scanned_list))
-                print(128 * '-', '\n')
-
                 print("w_thread: connecting to the pre-defined:\nessid: {}\npassword: {}\n".format(self.essid, self.password))
-                station.connect(self.essid, self.password)
-                sleep(3)
-
-            if station.isconnected():
-                # print("Connection established.")
-                station.config('mac')
-                # print("executing ifconfig command")
-                station.status()
-                # print("setting up the static IP")
-                station.ifconfig((self.ip, self.subnet, self.gateway, self.dns))
-                # print("re-executing ifconfig command:")
-                print(station.ifconfig())
-                self.p_led.value(1)
-            return station.isconnected()
-
+                for _ in range(2):
+                    if station.isconnected():
+                        print("Connection established.")
+                        # station.config('mac')
+                        station.status()
+                        # print("setting up the static IP")
+                        # station.ifconfig((self.ip, self.subnet, self.gateway, self.dns))
+                        # print("re-executing ifconfig command:")
+                        print(station.ifconfig())
+                        self.p_led.value(1)
+                        return station.isconnected()
+                    else:
+                        station.connect(self.essid, self.password)
+                        sleep(5)
+                # print("w_thread: scanning the network...")
+                # scanned = station.scan()
+                # modified_scanned_list = [list(j for idx, j in enumerate(signal) if idx not in [1, 4, 6]) for signal in scanned]
+                # header = ['ESSID', 'Channel', 'RSSI', 'AuthMode']
+                # row_format = "|{:^30}|" * (len(header))
+                # print(128 * '-')
+                # print(row_format.format(*header))
+                # print(128 * '-')
+                # print('\n'.join(row_format.format(*row) for row in modified_scanned_list))
+                # print(128 * '-', '\n')
         except Exception as e:
             print(e)
             return station.isconnected()
@@ -738,6 +732,7 @@ class wifiConnection:
 
     def __str__(self):
         print("WiFiConn class is activated.")
+
 def main():
     # gc.enable()
     def gc_thrd():
@@ -761,12 +756,13 @@ def main():
         tft.temp_status()
         tft.welcome(False)
         tft.frame()
+        print("LCD Initialization is done.")
 
         print('establishing wifi connection.')
         wf = wifiConnection()
         if wf.wf_connection():
             tft.wifi_status(True)
-            print(yellow + "WIFI is connected." + green)
+            print(yellow + "wifi is connected." + green)
             # wf_thrd = _thread.start_new_thread('wifi_thread', wf.wf_handler, ())
         else:
             wf.wf_disconnect()
@@ -779,7 +775,7 @@ def main():
         tft.opr_status('stepper')
         stpr = stprDRV8825(13, 33, 32, 35)
         stpr.interrupter()
-        print(red + 'stepper adjusted to zero-point.' + green)
+        print(yellow + 'stepper adjusted to point zero.' + green)
         tft.opr_status('done')
 
         # print('activated threads:\n')
@@ -792,15 +788,16 @@ def main():
         gc_thrd = _thread.start_new_thread('gc_thrd', gc_thrd, ())
         print(cyan + 'GC thread is activated.' + green)
         sleep(1)
-        status_thrd = _thread.start_new_thread('status_thrd', tft.status_thrd, ())
-        sleep(1)
-        print(cyan + 'STATUS thread activated.' + green)
-        sleep(1)
+        if wf.wf_connection():
+            _thread.start_new_thread('status_thrd', tft.status_thrd, ())
+            sleep(1)
+            print(cyan + 'STATUS thread activated.' + green)
+            sleep(1)
         print(cyan + 'SERIAL thread is activated.' + green)
-        serial_thrd = _thread.start_new_thread('serial_thrd', sr.sr_receiver, ())
-
+        _thread.start_new_thread('serial_thrd', sr.sr_receiver, ())
     except KeyboardInterrupt:
-        raise
+        print("main module aborted.")
+        return
     except Exception as e:
         print(e)
         print(red + 'main module interrupted.' + green)
