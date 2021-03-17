@@ -1,11 +1,11 @@
-### micropy ###
+#### micropy ####
 .micropy/*
 .pylintrc
 dev-requirements.txt
 micropy.json
 requirements.txt
 
-### vscode ###
+#### vscode ####
 .vscode/*
 .vscode/settings.json
 .vscode/tasks.json
