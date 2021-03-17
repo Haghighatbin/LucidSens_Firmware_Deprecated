@@ -25,6 +25,7 @@ yellow = '\033[93m'
 white = '\033[97m'
 
 class adcSampler:
+    """Handles analog readings on pin (36: assigned to HV) and pins (34, 39: assigned to SiPM)."""
     def __init__(self, pin):
         self.adc = ADC(pin)
         if pin == 36:
@@ -45,6 +46,9 @@ class adcSampler:
         returns an array[list] of ADC reads
         """
         def calibration(data):
+            """
+            ADC calibration module for a linear signal-to-voltage response.
+            """
             if self.mode == 'hv':
                 return (data + 95.68)/78.14
             elif self.mode == 'sipm':
@@ -78,7 +82,7 @@ class adcSampler:
                 except Exception as e:
                     self.adc.deinit()
                     print(e)
-                    print("deinitialised the adc, pins were released, exiting.")
+                    print("deinitialised the ADC, pins were released, exiting.")
                     break
         end_tot = ticks_ms()
         # print('{} ms took to collect the true_set.'.format(ticks_diff(end_tot, start_tot)))
@@ -91,6 +95,7 @@ class adcSampler:
         # return 'ADC module deinitialized.'
 
 class commandHandler:
+    """Handles the commands received from the GUI and calls the appropriate modules."""
     def __init__(self):
         self.clear = clear
         self.stdout_put = stdout_put
@@ -129,6 +134,9 @@ class commandHandler:
         return self.read
 
     def sender(self, response):
+        """
+        Sends the response back to GUI over serial.
+        """
         def chunker(cmd):
             # return [cmd[i:i + self.pck_size] for i in range(0, len(cmd), self.pck_size)]
             data = []
@@ -190,6 +198,7 @@ class commandHandler:
             pass
     
     def test_mod(self, iterations):
+        """Tests the USB-UART connection."""
         n = iterations
         response = ({'header': 'test_astroid'})
         response.update({'body': [[(i, 0), (0, abs(abs(i) - n)), (0, -(abs(abs(i) - n)))] for i in range(-n, n + 1)]})
@@ -197,6 +206,7 @@ class commandHandler:
         return jsnd_response
 
     def operator_func(self, command):
+        """Processes the commands received and calls the required modules."""
         if command['header'] == 'test':
             astroid = self.test_mod(command['body']['it'])
             resp = open('resp.txt', 'w')
@@ -325,10 +335,11 @@ class stprDRV8825:
         return
 
 class scrST7735:
+    """handles the TFT (128x128 pixels) LCD module."""
     def __init__(self):
         self.tft = TFT()
         self.tft.init(self.tft.ST7735R, speed=10000000, spihost=self.tft.VSPI, mosi=23, miso=19, clk=18, cs=5, dc=15,
-                      rst_pin=14, hastouch=False, bgr=False, width=128, height=128)
+                      rst_pin=26, hastouch=False, bgr=False, width=128, height=128)
         self.max_x, self.max_y = self.tft.screensize()
         self.init_x, self.init_y = 2, 3
         print('screen size: {}x{} pixel'.format(self.max_x, self.max_y))
@@ -340,12 +351,14 @@ class scrST7735:
         self.rtc.ntp_sync(server='cn.pool.ntp.org', tz='CST-8')
 
     def ntp(self):
+        """Network Time Protocol (needs wifi access, currently set on China time-zone)."""
         if not self.rtc.synced():
             print('NTP not synced, re-syncing...')
             self.rtc.ntp_sync(server='cn.pool.ntp.org', tz='CST-8')
             sleep(2)
 
     def welcome(self, signal):
+        """Welcome image."""
         if signal:
             self.tft.image(self.init_x + 6, self.init_y + 32, 'welcome.jpg', 2)
             sleep(3)
@@ -353,6 +366,7 @@ class scrST7735:
             self.clear_panel(self.init_x + 2, self.init_y + 21, 120, 110)
 
     def frame(self):
+        """Draws a frame arond the LCD."""
         self.tft.rect(self.init_x, self.init_y, self.max_x, self.max_y, color=self.tft.BLUE)
 
     def write(self, font, txt, color, x=2, y=3):
@@ -476,6 +490,7 @@ class scrST7735:
                 break
 
 class serialConnection:
+    """Handles the serial connection and data transfer over the serial connection."""
     def __init__(self):
         self.read = ''
         self.signal = ''
@@ -512,9 +527,11 @@ class serialConnection:
         return self.read
 
     def sr_handler(self, cmd):
+        """dispatching the commands to the operator."""
         self.opr.operator_func(cmd)
 
     def sr_receiver(self):
+        """Receives the commands over serial."""
         self.clear
         while True:
             try:
@@ -579,6 +596,9 @@ class serialConnection:
     #     return "Serial connection is established."
 
 class wifiConnection:
+    """Handles Wifi connections. 
+    Reads the Wifi credentials from the wfcred.txt files and tries to establish a connection.
+    """
     def __init__(self):
         self.p_led = Pin(2, Pin.OUT)
         self.clear = clear
@@ -613,6 +633,7 @@ class wifiConnection:
             print(e)
 
     def wf_handler(self):
+        "Receives commands over Wifi."
         opr = commandHandler()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         # sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -661,6 +682,7 @@ class wifiConnection:
                 break
 
     def wf_connection(self):
+        """Manages the Wifi connection."""
         station = WLAN(STA_IF)
         try:
             if station.isconnected():
@@ -701,6 +723,7 @@ class wifiConnection:
             return station.isconnected()
 
     def wf_disconnect(self):
+        """Manages Wifi disconnection."""
         station = WLAN(STA_IF)
         station.disconnect()
         print("wifi_thrd: shutting down the wifi.")
