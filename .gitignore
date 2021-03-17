@@ -1,11 +1,14 @@
-# ignore micropy files
-######################
-.micropy/
+### micropy ###
+.micropy/*
 .pylintrc
-dev-requirements
+dev-requirements.txt
 micropy.json
-requirements
+requirements.txt
 
-# ignore VSC files
-######################
-.vscode/
+### vscode ###
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace

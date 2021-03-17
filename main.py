@@ -24,14 +24,8 @@ pink = '\033[95m'
 yellow = '\033[93m'
 white = '\033[97m'
 
-class testAsteroid:
-    def test_asteroid(self, iterations):
-        n = iterations
-        response = ({'header': 'test_asteroid'})
-        response.update({'body': [[(i, 0), (0, abs(abs(i) - n)), (0, -(abs(abs(i) - n)))] for i in range(-n, n + 1)]})
-        jsnd_response = json.dumps(response)
-        return jsnd_response
 class adcSampler:
+
     def __init__(self, pin):
         self.adc = ADC(pin)
         if pin == 36:
@@ -96,6 +90,7 @@ class adcSampler:
     def deinit(self):
         self.adc.deinit()
         # return 'ADC module deinitialized.'
+
 class commandHandler:
     def __init__(self):
         self.clear = clear
@@ -194,13 +189,19 @@ class commandHandler:
             print('Aborted!')
         except Exception as e:
             print(e)
+    
+    def test_mod(self, iterations):
+        n = iterations
+        response = ({'header': 'test_astroid'})
+        response.update({'body': [[(i, 0), (0, abs(abs(i) - n)), (0, -(abs(abs(i) - n)))] for i in range(-n, n + 1)]})
+        jsnd_response = json.dumps(response)
+        return jsnd_response
 
     def operator_func(self, command):
         if command['header'] == 'test':
-            import test_A
-            asteroid = test_A.TestAsteroid()
+            astroid = self.test_mod(command['body']['it'])
             resp = open('resp.txt', 'w')
-            resp.write(asteroid.test_asteroid(command['body']['it']))
+            resp.write(astroid)
             resp.close()
             r = open('resp.txt', 'r')
             for line in r:
@@ -218,6 +219,7 @@ class commandHandler:
 
     def __str__(self):
         print("Operator class is activated.")
+
 class stprDRV8825:
 
     """ESP32 (PWM-based) Micropython class for DRV8825 stepper-motor driver.
@@ -325,6 +327,7 @@ class stprDRV8825:
                 self.pwr.value(0)
                 break
         return
+
 class scrST7735:
     def __init__(self):
         self.tft = TFT()
@@ -477,6 +480,7 @@ class scrST7735:
                 print('exception raised!')
                 print(e)
                 break
+
 class serialConnection:
     def __init__(self):
         self.read = ''
@@ -583,12 +587,13 @@ class serialConnection:
 
     def __str__(self):
         return "Serial connection is established."
+
 class wifiConnection:
     def __init__(self):
         self.p_led = Pin(2, Pin.OUT)
         self.clear = clear
         try:
-            f = open("account.txt", 'r')
+            f = open("wfcreds.txt", 'r')
             for lines in f:
                 for line in lines.split('\r'):
                     if "#" in line:
