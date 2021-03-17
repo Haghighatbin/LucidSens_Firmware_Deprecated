@@ -1,9 +1,11 @@
 # ignore micropy files
-.micropy
+######################
+.micropy/
 .pylintrc
 dev-requirements
 micropy.json
 requirements
 
 # ignore VSC files
-.vscode
+######################
+.vscode/
