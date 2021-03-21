@@ -1,3 +1,10 @@
+"""
+LucidSens Firmware
+
+This firmware has been written for the LucidSens device based on Micropython (Loboris port ESP32_LoBo_v3.2.24) for ESP32 microcontrollers:
+https://github.com/loboris/MicroPython_ESP32_psRAM_LoBo/wiki
+"""
+import sys
 import _thread
 import gc
 from array import array
@@ -5,24 +12,24 @@ from display import TFT
 from network import WLAN, STA_IF
 from machine import Pin, ADC, PWM, RTC, DHT, stdin_get, stdout_put
 from utime import ticks_ms, ticks_diff, sleep, strftime, localtime
-from upysh import clear
+from upysh import *
+clear
 import usocket as socket
 import ujson as json
 
-_thread.stack_size(3*4096)
-# print('THREAD stack_size is: {}'.format(_thread.stack_size()))
+# Color Codes
+GREEN = '\033[92m'
+RED = '\033[91m'
+CYAN = '\033[96m'
+PINK  = '\033[95m'
+YELLOW = '\033[93m'
+WHITE = '\033[97m'
+
+print(GREEN + 'THREAD stack_size is: {}'.format(_thread.stack_size(3*4096)))
 p14 = Pin(14, Pin.OUT, value=0)
 p15 = Pin(15, Pin.OUT, value=0)
 p5 = Pin(5, Pin.OUT, value=0)
-# print('Pins 4, 14, 15 were pulled down.')
-
-# color codes
-green = '\033[92m'
-red = '\033[91m'
-cyan = '\033[96m'
-pink = '\033[95m'
-yellow = '\033[93m'
-white = '\033[97m'
+print('pins 14, 15, 5 were pulled down.' + WHITE)
 
 class adcSampler:
     """Handles analog readings on pin (36: assigned to HV) and pins (34, 39: assigned to SiPM)."""
@@ -81,7 +88,7 @@ class adcSampler:
                     break
                 except Exception as e:
                     self.adc.deinit()
-                    print(e)
+                    print(YELLOW  + e + WHITE)
                     print("deinitialised the ADC, pins were released, exiting.")
                     break
         end_tot = ticks_ms()
@@ -99,46 +106,36 @@ class commandHandler:
     def __init__(self):
         self.clear = clear
         self.stdout_put = stdout_put
-        self.seg_size = 510
+        self.seg_size = 512
         self.read = ''
 
     def read_until(self, ending, timeout=10000):
-        try:
-            self.read = stdin_get(1, timeout)
-            if self.read is None:
-                self.read = ''
-            else:
-                pass
-            timeout_count = 0
-            while True:
-                if self.read is not None:
-                    if self.read.endswith(ending):
-                        break
-                    else:
-                        new_data = stdin_get(1, timeout)
-                        self.read += new_data
-                        timeout_count = 0
-                elif self.read is None:
-                    # print('read is None')
+        self.read = stdin_get(1, timeout)
+        if self.read is None:
+            return '\n'
+
+        timeout_count = 0
+        while True:
+            if self.read is not None:
+                if self.read.endswith(ending):
                     break
                 else:
-                    timeout_count += 1
-                    if timeout is not None and timeout_count >= timeout:
-                        break
-        except KeyboardInterrupt:
-            print('commandHandler: aborted!')
-            return
-        except Exception as e:
-            # print(e)
-            pass
+                    new_data = stdin_get(1, timeout)
+                    self.read += new_data
+                    timeout_count = 0
+            else:
+                timeout_count += 1
+                if timeout is not None and timeout_count >= timeout:
+                    break
         return self.read
 
     def sender(self, response):
         """
         Sends the response back to GUI over serial.
         """
-        def chunker(cmd):
-            # return [cmd[i:i + self.pck_size] for i in range(0, len(cmd), self.pck_size)]
+        self.clear
+
+        def chopper(cmd):
             data = []
             segments = [cmd[i:i + self.seg_size] for i in range(0, len(cmd), self.seg_size)]
             for segment in segments:
@@ -147,58 +144,32 @@ class commandHandler:
                 else:
                     data.append(segment + '_#')
             return data
-        self.clear
-        try:
-            if len(response) > self.seg_size:
-                # for idx, data in enumerate([chunk for chunk in chunker(response)]):
-                for data in ([chunk for chunk in chunker(response)]):
+        if len(response) > self.seg_size:
+            for data in ([chunk for chunk in chopper(response)]):
+                for _ in range(2):
                     self.stdout_put(data)
-                    sleep(1)
+                    sleep(2)
                     resp = self.read_until('#', 5000)
-                    if 'EOF received.\n' in resp:
-                        pass
-                    elif 'got it!\n' in resp:
+                    if 'EOF received.' in resp:
+                        return '\nresponse was successfully sent, exiting the sender.'
+                    elif 'got it!' in resp:
                         pass
                     else:
-                        while True:
-                            self.stdout_put(data)
-                            sleep(1)
-                            resp = self.read_until('#', 5000)
-                            if 'EOF received.\n' in resp:
-                                break
-                            elif 'got it!\n' in resp:
-                                break
-                            else:
-                                sleep(2)
-            else:
-                self.stdout_put(response)
-                sleep(2)
+                        sleep(2)
+
+        else:
+            for _ in range(2):
+                self.stdout_put(response + "*#")
+                sleep(1)
                 resp = self.read_until('#', 5000)
-                if 'EOF received.\n' in resp:
-                    pass
-                elif 'got it!\n' in resp:
-                    pass
+                if 'EOF received.' in resp:
+                    return '\nresponse was successfully sent, exiting the sender.'
                 else:
-                    while True:
-                        self.stdout_put(response)
-                        sleep(1)
-                        resp = self.read_until('#', 5000)
-                        if 'got it!' in resp:
-                            break
-                        elif 'EOF received.\n' in resp:
-                            break
-                        else:
-                            sleep(2)
-            sleep(1)
-        except KeyboardInterrupt:
-            print('commandHandler: aborted!')
-            return
-        except Exception as e:
-            # print(e)
-            pass
+                    sleep(2)
+        return '\nexiting the commandHandler_sender.'
     
     def test_mod(self, iterations):
-        """Tests the USB-UART connection."""
+        """Checks the validity of USB-UART connection."""
         n = iterations
         response = ({'header': 'test_astroid'})
         response.update({'body': [[(i, 0), (0, abs(abs(i) - n)), (0, -(abs(abs(i) - n)))] for i in range(-n, n + 1)]})
@@ -214,9 +185,8 @@ class commandHandler:
             resp.close()
             r = open('resp.txt', 'r')
             for line in r:
-                self.sender(line)
-            return
-
+                return(self.sender(line))
+            
         # if command['header'] == 'run':
         #     if command['body']['it'] is not None:
         #         from drv8825_esp32_gpio import DRV8825
@@ -277,13 +247,13 @@ class stprDRV8825:
             sleep(3)
             stepper.deinit()
         except KeyboardInterrupt:
-            print('stepper: aborted!')
+            print(RED + 'stepper: aborted!' + WHITE)
             stepper.deinit()
             self.interrupter()
         except Exception as e:
             stepper.deinit()
             self.interrupter()
-            print(e)
+            print(YELLOW  + e + WHITE)
         finally:
             stepper.deinit()
             self.interrupter()
@@ -306,10 +276,10 @@ class stprDRV8825:
                     sleep(acquisition_time)
             sleep(3)
         except KeyboardInterrupt:
-            print('stepper: aborted!')
+            print(RED + 'stepper: aborted!' + WHITE)
             self.interrupter()
         except Exception as e:
-            print(e)
+            print(YELLOW  + e + WHITE)
             self.interrupter()
         finally:
             stepper.value(0)
@@ -322,7 +292,7 @@ class stprDRV8825:
         stepper = Pin(self.step_pin, Pin.OUT)
         if not self.intrptr.value():
             self.pwr.value(0)
-            print("stepper has already been in point zero.")
+            print(GREEN + "stepper has already been in point zero." + WHITE)
             return
         while True:
             stepper.value(1)
@@ -342,7 +312,7 @@ class scrST7735:
                       rst_pin=26, hastouch=False, bgr=False, width=128, height=128)
         self.max_x, self.max_y = self.tft.screensize()
         self.init_x, self.init_y = 2, 3
-        print('screen size: {}x{} pixel'.format(self.max_x, self.max_y))
+        # print('screen size: {}x{} pixel'.format(self.max_x, self.max_y))
         self.rtc = RTC()
         self.adc = adcSampler(36)
         self.dht = DHT(Pin(27), DHT.DHT2X)
@@ -353,7 +323,7 @@ class scrST7735:
     def ntp(self):
         """Network Time Protocol (needs wifi access, currently set on China time-zone)."""
         if not self.rtc.synced():
-            print('NTP not synced, re-syncing...')
+            print(RED + 'NTP not synced, re-syncing...' + WHITE)
             self.rtc.ntp_sync(server='cn.pool.ntp.org', tz='CST-8')
             sleep(2)
 
@@ -466,7 +436,7 @@ class scrST7735:
         self.frame()
         self.write(font='FONTS/font20B.fon', txt='deinitialized!', color=self.TFT.RED, x=20, y=60)
         self.tft.deinit()
-        print('TFT module deinitialized.')
+        print(RED + 'TFT: module deinitialized.' + WHITE)
 
     def status_thrd(self):
         self.tft.image(self.init_x + 100, self.init_y + 77, 'ICONS/humidity.jpg', 2, self.tft.JPG)
@@ -474,7 +444,7 @@ class scrST7735:
         while True:
             ntf = _thread.getnotification()
             if ntf == _thread.EXIT:
-                print('status_thread: EXIT command received.')
+                print('status_thrd: EXIT command received.')
                 return
             try:
                 self.ntp()
@@ -483,10 +453,10 @@ class scrST7735:
                 self.time_panel()
                 sleep(10)
             except KeyboardInterrupt:
-                print('display: aborted!')
+                print(RED + 'TFT: aborted!' + WHITE)
                 break
             except Exception as e:
-                print(e)
+                print(YELLOW  + e + WHITE)
                 break
 
 class serialConnection:
@@ -499,98 +469,81 @@ class serialConnection:
         self.clear = clear
 
     def read_until(self, ending, timeout=10000):
-        try:
-            self.read = stdin_get(1, timeout)
-            if self.read is None:
-                self.read = ''
-            else:
-                pass
-            timeout_count = 0
-            while True:
-                if self.read is not None:
-                    if self.read.endswith(ending):
-                        break
-                    else:
-                        new_data = stdin_get(1, timeout)
-                        self.read += new_data
-                        timeout_count = 0
-                elif self.read is None:
-                    # print('read is None')
+        self.read = stdin_get(1, timeout)
+        if self.read is None:
+            return '\n'
+
+        timeout_count = 0
+        while True:
+            if self.read is not None:
+                if self.read.endswith(ending):
                     break
                 else:
-                    timeout_count += 1
-                    if timeout is not None and timeout_count >= timeout:
-                        break
-        except Exception as e:
-            # print(e)
-            pass
+                    new_data = stdin_get(1, timeout)
+                    self.read += new_data
+                    timeout_count = 0
+
+            else:
+                timeout_count += 1
+                if timeout is not None and timeout_count >= timeout:
+                    break
         return self.read
 
     def sr_handler(self, cmd):
         """dispatching the commands to the operator."""
-        self.opr.operator_func(cmd)
+        print(self.opr.operator_func(cmd))
+        print(GREEN + 'calling back the sr_receiver.' + WHITE)
+        self.sr_receiver()
 
     def sr_receiver(self):
-        """Receives the commands over serial."""
+        """Receives the commands over serial.
+        type !# to exit.
+        """
         self.clear
         while True:
-            try:
-                # print('sr_thread: sending READY signal.')
-                # machine.stdout_put('s_thread: READY.\n')
-                # utime.sleep(1)
-                # while 'go#' not in self.read_until('#'):
-                while 'go#' not in self.signal and '!#' not in self.signal:
-                    stdout_put('s_thread: READY.\n')
-                    sleep(2)
-                    self.signal = self.read_until('#')
+            while 'go#' not in self.signal and '!#' not in self.signal:
+                stdout_put('sr_receiver: READY\n')
+                sleep(2)
+                self.signal = self.read_until('#')
 
-                if '!#' in self.signal:
-                    print('s_thread: aborted by user.')
-                    break
-                else:
-                    stdout_put('got it!\n')
-                    self.clear
+            if '!#' in self.signal:
+                print('sr_receiver:' + RED + ' aborted!' + WHITE)
+                sys.exit(0)
+            else:
+                stdout_put('got it!\n')
+                self.clear
 
-                while '*' not in self.content:
-                    try:
-                        data = self.read_until('#')
-                        # print(data)
-                        if '#' in data and data[:-2] not in self.content:
-                            if data[-2] == '*':
-                                self.content += data[:-1]
-                                break
-                            elif data[-2] == '_':
-                                self.content += data[:-2]
-                                stdout_put('got it!\n')
-                            else:
-                                sleep(1)
+            while '*' not in self.content:
+                try:
+                    data = self.read_until('#')
+                    print(data)
+                    if '#' in data and data[:-2] not in self.content:
+                        if data[-2] == '*':
+                            self.content += data[:-1]
+                            break
+                        elif data[-2] == '_':
+                            self.content += data[:-2]
+                            stdout_put('got it!\n')
                         else:
                             sleep(1)
-                    except Exception as e:
-                        # print(e)
-                        break
-                sleep(1)
-                if '*' in self.content:
-                    stdout_put('EOF received.\n')
-                    # print('Content: {}\n'.format(content))
-                    # print('length: {} chars\n'.format(len(content)))
-                    print('saving cmd file\n')
-                    raw_cmd = open('cmd.txt', 'w')
-                    raw_cmd.write(self.content[:-1])
-                    raw_cmd.close()
-                    resp = open('cmd.txt', 'r')
-                    print('evaling cmd in resp.\n')
-                    for line in resp:
-                        cmd = eval(line)
-                        self.sr_handler(cmd)
-                    resp.close()
-                    print('closed resp.\n')
-            except KeyboardInterrupt:
-                print('sr_receiver: aborted!')
-                break
-            except Exception as e:
-                print(e)
-                break
+                    else:
+                        sleep(1)
+                except Exception as e:
+                    print(YELLOW  + e + WHITE)
+                    break
+            sleep(1)
+            if '*' in self.content:
+                stdout_put('EOF received.\n')
+                raw_cmd = open('cmd.txt', 'w')
+                raw_cmd.write(self.content[:-1])
+                raw_cmd.close()
+                order = open('cmd.txt', 'r')
+                for line in order:
+                    cmd = eval(line)
+                    self.sr_handler(cmd)
+                    print('calling sr_handler. \n')
+                order.close()
+        return 'exiting the sr_receiver.'
 
     # def __str__(self):
     #     return "Serial connection is established."
@@ -750,72 +703,73 @@ class wifiConnection:
 
 def main():
     # gc.enable()
-    def gc_thrd():
-        _thread.allowsuspend(True)
-        while True:
-            ntf = _thread.getnotification()
-            if ntf == _thread.EXIT:
-                print('gc_thrd: EXIT command received.')
-                return
-            gc.threshold(gc.mem_free() // 4 + gc.mem_alloc())
-            if gc.mem_free() < gc.threshold():
-                gc.collect()
-                print('available memory now: {}'.format(gc.mem_free()))
-            sleep(10)
+    # def gc_thrd():
+    #     _thread.allowsuspend(True)
+    #     while True:
+    #         ntf = _thread.getnotification()
+    #         if ntf == _thread.EXIT:
+    #             print('gc_thrd: EXIT command received.')
+    #             return
+    #         gc.threshold(gc.mem_free() // 4 + gc.mem_alloc())
+    #         if gc.mem_free() < gc.threshold():
+    #             gc.collect()
+    #             print('available memory now: {}'.format(gc.mem_free()))
+    #         sleep(10)
     try:
-        tft = scrST7735()
-        tft.clear()
-        tft.welcome(True)
-        tft.connect_status()
-        tft.serial_status(False)
-        tft.temp_status()
-        tft.welcome(False)
-        tft.frame()
-        print('display module initialised.')
+    #     tft = scrST7735()
+    #     tft.clear()
+    #     tft.welcome(True)
+    #     tft.connect_status()
+    #     tft.serial_status(False)
+    #     tft.temp_status()
+    #     tft.welcome(False)
+    #     tft.frame()
+    #     print('display module initialised.')
 
-        print('establishing wifi connection.')
-        wf = wifiConnection()
-        if wf.wf_connection():
-            tft.wifi_status(True)
-            print(yellow + "wifi is connected." + green)
-            # wf_thrd = _thread.start_new_thread('wifi_thrd', wf.wf_handler, ())
-        else:
-            wf.wf_disconnect()
-            print(red + 'wifi was not connected, shutting down the module.' + green)
-            tft.wifi_status(False)
+    #     print('establishing wifi connection.')
+    #     wf = wifiConnection()
+    #     if wf.wf_connection():
+    #         tft.wifi_status(True)
+    #         print(YELLOW + "wifi is connected." + GREEN)
+    #         # wf_thrd = _thread.start_new_thread('wifi_thrd', wf.wf_handler, ())
+    #     else:
+    #         wf.wf_disconnect()
+    #         print(RED + 'wifi was not connected, shutting down the module.' + GREEN)
+    #         tft.wifi_status(False)
 
-        tft.hv_panel(True)
+    #     tft.hv_panel(True)
 
-        print('initialising the stepper.')
-        tft.opr_status('stepper')
-        stpr = stprDRV8825(13, 33, 32, 35)
-        stpr.interrupter()
-        print(yellow + 'stepper adjusted to point zero.' + green)
-        tft.opr_status('done')
+    #     print('initialising the stepper.')
+    #     tft.opr_status('stepper')
+    #     stpr = stprDRV8825(13, 33, 32, 35)
+    #     stpr.interrupter()
+    #     print(YELLOW + 'stepper adjusted to point zero.' + GREEN)
+    #     tft.opr_status('done')
 
-        # print('activated threads:\n')
-        # print('\n'.join(pink + str(thrd) + green for thrd in _thread.list(False)))
+    #     # print('activated threads:\n')
+    #     # print('\n'.join(PINK  + str(thrd) + GREENfor thrd in _thread.list(False)))
 
-        print('establishing serial connection.')
+    #     print('establishing serial connection.')
         sr = serialConnection()
-        tft.serial_status(True)
+        sr.sr_receiver()
+        # tft.serial_status(True)
 
-        gc_thrd = _thread.start_new_thread('gc_thrd', gc_thrd, ())
-        print(cyan + 'gc_thrd initialised.' + green)
-        sleep(1)
-        if wf.wf_connection():
-            _thread.start_new_thread('status_thrd', tft.status_thrd, ())
-            sleep(1)
-            print(cyan + 'status_thrd initialised.' + green)
-            sleep(1)
-        print(cyan + 'serial_thrd initialised.' + green)
-        _thread.start_new_thread('serial_thrd', sr.sr_receiver, ())
+        # # gc_thrd = _thread.start_new_thread('gc_thrd', gc_thrd, ())
+        # print(CYAN + 'gc_thrd initialised.' + GREEN)
+        # sleep(1)
+        # if wf.wf_connection():
+        #     # _thread.start_new_thread('status_thrd', tft.status_thrd, ())
+        #     sleep(1)
+        #     print(CYAN + 'status_thrd initialised.' + GREEN)
+        #     sleep(1)
+        # print(CYAN + 'serial_thrd initialised.' + GREEN)
+        # _thread.start_new_thread('serial_thrd', sr.sr_receiver, ())
     except KeyboardInterrupt:
-        print('main module aborted.')
-        return
-    except Exception as e:
-        print(e)
-        print(red + 'main module interrupted.' + green)
+        print(RED + 'main module aborted!' + WHITE)
+        sys.exit(0)
 
+    except Exception as e:
+        print(YELLOW  + e + WHITE)
+        sys.exit(1)
 if __name__ == '__main__':
     main()
