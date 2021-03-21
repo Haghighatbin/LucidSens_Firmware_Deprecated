@@ -88,7 +88,7 @@ class adcSampler:
                     break
                 except Exception as e:
                     self.adc.deinit()
-                    print(YELLOW  + e + WHITE)
+                    print(e)
                     print("deinitialised the ADC, pins were released, exiting.")
                     break
         end_tot = ticks_ms()
@@ -146,26 +146,26 @@ class commandHandler:
             return data
         if len(response) > self.seg_size:
             for data in ([chunk for chunk in chopper(response)]):
-                for _ in range(2):
+                for _ in range(3):
                     self.stdout_put(data)
-                    sleep(2)
+                    sleep(2) 
                     resp = self.read_until('#', 5000)
                     if 'EOF received.' in resp:
-                        return '\nresponse was successfully sent, exiting the sender.'
-                    elif 'got it!' in resp:
+                        return '\nresponse was successfully sent, exiting the sender, chopper involved'
+                    elif 'got it.' in resp:
                         pass
                     else:
-                        sleep(2)
+                        sleep(1)
 
         else:
-            for _ in range(2):
+            for _ in range(3):
                 self.stdout_put(response + "*#")
-                sleep(1)
+                sleep(2)
                 resp = self.read_until('#', 5000)
                 if 'EOF received.' in resp:
-                    return '\nresponse was successfully sent, exiting the sender.'
+                    return '\nresponse was successfully sent, exiting the sender, no chopper.'
                 else:
-                    sleep(2)
+                    sleep(1)
         return '\nexiting the commandHandler_sender.'
     
     def test_mod(self, iterations):
@@ -253,7 +253,7 @@ class stprDRV8825:
         except Exception as e:
             stepper.deinit()
             self.interrupter()
-            print(YELLOW  + e + WHITE)
+            print(e)
         finally:
             stepper.deinit()
             self.interrupter()
@@ -279,7 +279,7 @@ class stprDRV8825:
             print(RED + 'stepper: aborted!' + WHITE)
             self.interrupter()
         except Exception as e:
-            print(YELLOW  + e + WHITE)
+            print(e)
             self.interrupter()
         finally:
             stepper.value(0)
@@ -456,7 +456,7 @@ class scrST7735:
                 print(RED + 'TFT: aborted!' + WHITE)
                 break
             except Exception as e:
-                print(YELLOW  + e + WHITE)
+                print(e)
                 break
 
 class serialConnection:
@@ -505,14 +505,13 @@ class serialConnection:
                 stdout_put('sr_receiver: READY\n')
                 sleep(2)
                 self.signal = self.read_until('#')
-
             if '!#' in self.signal:
                 print('sr_receiver:' + RED + ' aborted!' + WHITE)
                 sys.exit(0)
             else:
-                stdout_put('got it!\n')
+                stdout_put('got it.\n')
                 self.clear
-
+                self.signal = ''
             while '*' not in self.content:
                 try:
                     data = self.read_until('#')
@@ -523,25 +522,26 @@ class serialConnection:
                             break
                         elif data[-2] == '_':
                             self.content += data[:-2]
-                            stdout_put('got it!\n')
+                            stdout_put('got it.\n')
                         else:
                             sleep(1)
                     else:
                         sleep(1)
                 except Exception as e:
-                    print(YELLOW  + e + WHITE)
+                    print(e)
                     break
             sleep(1)
             if '*' in self.content:
                 stdout_put('EOF received.\n')
+                sleep(2) 
                 raw_cmd = open('cmd.txt', 'w')
                 raw_cmd.write(self.content[:-1])
                 raw_cmd.close()
+                self.content = ''
                 order = open('cmd.txt', 'r')
                 for line in order:
                     cmd = eval(line)
                     self.sr_handler(cmd)
-                    print('calling sr_handler. \n')
                 order.close()
         return 'exiting the sr_receiver.'
 
@@ -702,74 +702,71 @@ class wifiConnection:
     #     print("WiFiConn class is activated.")
 
 def main():
-    # gc.enable()
-    # def gc_thrd():
-    #     _thread.allowsuspend(True)
-    #     while True:
-    #         ntf = _thread.getnotification()
-    #         if ntf == _thread.EXIT:
-    #             print('gc_thrd: EXIT command received.')
-    #             return
-    #         gc.threshold(gc.mem_free() // 4 + gc.mem_alloc())
-    #         if gc.mem_free() < gc.threshold():
-    #             gc.collect()
-    #             print('available memory now: {}'.format(gc.mem_free()))
-    #         sleep(10)
+    gc.enable()
+    def gc_thrd():
+        _thread.allowsuspend(True)
+        while True:
+            ntf = _thread.getnotification()
+            if ntf == _thread.EXIT:
+                print('gc_thrd: EXIT command received.')
+                return
+            gc.threshold(gc.mem_free() // 4 + gc.mem_alloc())
+            if gc.mem_free() < gc.threshold():
+                gc.collect()
+                print('available memory: {}'.format(gc.mem_free()))
+            sleep(10)
     try:
-    #     tft = scrST7735()
-    #     tft.clear()
-    #     tft.welcome(True)
-    #     tft.connect_status()
-    #     tft.serial_status(False)
-    #     tft.temp_status()
-    #     tft.welcome(False)
-    #     tft.frame()
-    #     print('display module initialised.')
+        tft = scrST7735()
+        tft.clear()
+        tft.welcome(True)
+        tft.connect_status()
+        tft.serial_status(False)
+        tft.temp_status()
+        tft.welcome(False)
+        tft.frame()
+        print('TFT module initialised.')
 
-    #     print('establishing wifi connection.')
-    #     wf = wifiConnection()
-    #     if wf.wf_connection():
-    #         tft.wifi_status(True)
-    #         print(YELLOW + "wifi is connected." + GREEN)
-    #         # wf_thrd = _thread.start_new_thread('wifi_thrd', wf.wf_handler, ())
-    #     else:
-    #         wf.wf_disconnect()
-    #         print(RED + 'wifi was not connected, shutting down the module.' + GREEN)
-    #         tft.wifi_status(False)
+        print('establishing wifi connection.')
+        wf = wifiConnection()
+        if wf.wf_connection():
+            tft.wifi_status(True)
+            # print(YELLOW + "wifi is connected." + GREEN)
+            # wf_thrd = _thread.start_new_thread('wifi_thrd', wf.wf_handler, ())
+        else:
+            wf.wf_disconnect()
+            print(RED + 'wifi was not connected, shutting down the module.' + GREEN)
+            tft.wifi_status(False)
 
-    #     tft.hv_panel(True)
+        tft.hv_panel(True)
 
-    #     print('initialising the stepper.')
-    #     tft.opr_status('stepper')
-    #     stpr = stprDRV8825(13, 33, 32, 35)
-    #     stpr.interrupter()
-    #     print(YELLOW + 'stepper adjusted to point zero.' + GREEN)
-    #     tft.opr_status('done')
+        print('initialising the stepper.')
+        tft.opr_status('stepper')
+        stpr = stprDRV8825(13, 33, 32, 35)
+        stpr.interrupter()
+        print(YELLOW + 'stepper adjusted to point zero.' + GREEN)
+        tft.opr_status('done')
 
-    #     # print('activated threads:\n')
-    #     # print('\n'.join(PINK  + str(thrd) + GREENfor thrd in _thread.list(False)))
+        gc_thrd = _thread.start_new_thread('gc_thrd', gc_thrd, ())
+        print(CYAN + 'gc_thrd initialised.' + GREEN)
+        sleep(1)
 
-    #     print('establishing serial connection.')
+        if wf.wf_connection():
+            _thread.start_new_thread('status_thrd', tft.status_thrd, ())
+            sleep(1)
+            print(CYAN + 'status_thrd initialised.' + GREEN)
+            sleep(1)
+
+        print('establishing serial connection.')
+        tft.serial_status(True)
         sr = serialConnection()
         sr.sr_receiver()
-        # tft.serial_status(True)
 
-        # # gc_thrd = _thread.start_new_thread('gc_thrd', gc_thrd, ())
-        # print(CYAN + 'gc_thrd initialised.' + GREEN)
-        # sleep(1)
-        # if wf.wf_connection():
-        #     # _thread.start_new_thread('status_thrd', tft.status_thrd, ())
-        #     sleep(1)
-        #     print(CYAN + 'status_thrd initialised.' + GREEN)
-        #     sleep(1)
-        # print(CYAN + 'serial_thrd initialised.' + GREEN)
-        # _thread.start_new_thread('serial_thrd', sr.sr_receiver, ())
     except KeyboardInterrupt:
         print(RED + 'main module aborted!' + WHITE)
         sys.exit(0)
 
     except Exception as e:
-        print(YELLOW  + e + WHITE)
+        print(e)
         sys.exit(1)
 if __name__ == '__main__':
     main()
