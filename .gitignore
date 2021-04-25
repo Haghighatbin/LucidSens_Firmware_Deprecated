@@ -4,6 +4,7 @@
 dev-requirements.txt
 micropy.json
 requirements.txt
+pymakr.conf
 
 #### vscode ####
 .vscode/*
