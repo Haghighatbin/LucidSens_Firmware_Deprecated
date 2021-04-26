@@ -12,7 +12,7 @@ aminhb@tutanota.com
 """
 # pylint: disable=no-name-in-module
 # pylint: disable=no-member
-import sys
+import sys, os
 import _thread
 import gc
 from array import array
@@ -103,8 +103,8 @@ class CommandHandler:
                 if segment == segments[-1]:
                     data.append(segment + '*#')
                 else:
-                    # data.append(segment + '[{}/{}]_#'.format(idx, len(segments)))
-                    data.append(segment + '_#')
+                    data.append(segment + '<{}/{}>_#'.format(idx, len(segments)))
+                    # data.append(segment + '_#')
             return data
         if len(response) > self.seg_size:
             for data in ([chunk for chunk in chopper(response)]):
@@ -233,12 +233,11 @@ class DetectionModule:
                         break
                 except KeyboardInterrupt:
                     self.adc.deinit()
-                    break
+                    return
                 except Exception as e:
                     self.adc.deinit()
                     print(e)
-                    print("deinitialised the ADC, pins were released, exiting.")
-                    break
+                    return "deinitialised the ADC, pins were released, exiting."
         # print('true val: {}'.format(sum(true_set)/len(true_set)))
         # print('calib val: {}'.format(sum(calib_set)/len(calib_set)))
         return calib_set
@@ -745,6 +744,8 @@ class WifiConnection:
 
     def wf_connection(self):
         """Manages the Wifi connection."""
+        if 'wfcreds.txt' not in os.listdir():
+            return False
         try:
             with open("wfcreds.txt", 'r') as f:
                 for lines in f:
