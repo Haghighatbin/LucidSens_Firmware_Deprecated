@@ -33,11 +33,8 @@ WHITE = '\033[97m'
 
 gc.enable()
 print(GREEN + 'THREAD stack_size is: {}'.format(_thread.stack_size(3*4096)))
-p5 = Pin(5, Pin.OUT, value=0)
-p13 = Pin(13, Pin.OUT, value=0)
-p14 = Pin(14, Pin.OUT, value=0)
-p15 = Pin(15, Pin.OUT, value=0)
-p21 = Pin(5, Pin.OUT, value=0)
+for p in [5, 13, 14, 15, 21]:
+    Pin(p, Pin.OUT, value=0)
 print('pins 5, 13, 14, 15, 21 were pulled down.' + WHITE)
 
 class kill:
@@ -64,6 +61,8 @@ class TemperatureSensor:
         if sensor[0]:
             self.temperature, self.humidity = sensor[1], sensor[2]
             return [self.temperature, self.humidity]
+        else:
+            return False
 
 class CommandHandler:
     """Handles the commands received from the GUI and calls the appropriate modules."""
@@ -104,7 +103,6 @@ class CommandHandler:
                     data.append(segment + '*#')
                 else:
                     data.append(segment + '<{}/{}>_#'.format(idx, len(segments)))
-                    # data.append(segment + '_#')
             return data
         if len(response) > self.seg_size:
             for data in ([chunk for chunk in chopper(response)]):
@@ -205,21 +203,27 @@ class DetectionModule:
         raw_to_avrg: number of raw samples to be picked and averaged between two intervals
         returns an array[list] of ADC read
         """
-        def calibration(data):
-            """
-            ADC calibration module for a linear signal-to-voltage response.
-            """
+        def dac_calibration(vol):
+            """DAC calibration module for a linear voltage-to-response response."""
+            return int((vol + 5.15) / 0.39)
+
+        def adc_calibration(data):
+            """ADC calibration module for a linear signal-to-voltage response."""
             if self.mode == 'hv':
-                return (data + 95.68)/78.14
+                return (data + 176.3)/79.3 # calibrated on 8052021
             elif self.mode == 'sipm':
-                return (data + 183.7)/1276.1
+                return (data + 168.6)/1288.2
             else:
                 raise RuntimeError('Invalid pin definition or wrong call.')
+
         frq = int(raw_to_avrg / intervals)
         datapoint = array('H', raw_to_avrg)
         true_set = array('d')
         calib_set = array('d')
-        self.dac.write(60) # Needs a conversion function here
+
+        self.dac.write(dac_calibration(self.voltage))
+        print("DAC value: {}\nVoltage: {}V".format(self.dac, self.voltage))
+
         for _ in range(int(acquisition/intervals)):
             self.adc.collect(freq=frq, data=datapoint)
             while True:
@@ -227,9 +231,10 @@ class DetectionModule:
                     if not self.adc.progress()[0]:
                         true_val = self.adc.collected()[2]
                         # returns the average, 0 -> Min, 1-> Max, 3 -> rms
-                        calib_val = calibration(self.adc.collected()[2])
+                        calib_val = adc_calibration(self.adc.collected()[2])
                         true_set.append(true_val)
                         calib_set.append(calib_val)
+                        # print("True_point: {} ----- Caliberated_point: {}".format(true_val, calib_val))
                         break
                 except KeyboardInterrupt:
                     self.adc.deinit()
@@ -238,8 +243,10 @@ class DetectionModule:
                     self.adc.deinit()
                     print(e)
                     return "deinitialised the ADC, pins were released, exiting."
-        # print('true val: {}'.format(sum(true_set)/len(true_set)))
-        # print('calib val: {}'.format(sum(calib_set)/len(calib_set)))
+        # print('true val: {}'.format(round(sum(true_set)/len(true_set),1)))
+        # print('calib val: {}'.format(round(sum(calib_set)/len(calib_set),2)))
+
+        # returning the list of calibrated acquired values
         return calib_set
 
     def deinit(self):
@@ -259,7 +266,7 @@ class SamplingModule:
         self.intrptr = Pin(intrptr_pin, Pin.IN)
         self.step_pin = step_pin
         self.spr = 200  # 200 Steps per revolution: 360 / 1.8
-        self.delay = 0.01  # Delay between steps
+        self.delay = 0.001  # Delay between steps
         self._current_temp = TemperatureSensor()
         self.current_temp = float()
         self.target_temp = float()
@@ -270,7 +277,7 @@ class SamplingModule:
         self.blower = 'Off'
         self.collected_data = []
 
-    def incubation_thrd(self, freq=1024, duty=50, direction=0, duration=1, target_temp=37, blower='On'):
+    def incubation_thrd(self, freq=300, duty=50, direction=0, duration=1, target_temp=37, blower='On'):
         """Motor rotates for [duration]minutes."""
         _thread.allowsuspend(True)
         stepper = PWM(self.step_pin)
@@ -278,101 +285,81 @@ class SamplingModule:
         self.timer = duration
         self.blower = blower
         def ramp_gen(freq):
-            _a, _b = 1, 11
-            return [int(freq * 1/(1+2**(_a*(x-_b))) * 1/(1+2**(-_a*(x+_b)))) + 10 for x in range(-16, 17)]
+            _a, _b, _base = 1, 7, 100
+            return [int(freq * 1/(1+2**(_a*(x-_b))) * 1/(1+2**(-_a*(x+_b)))) + _base for x in range(-12,13)]
 
         ramp = ramp_gen(freq)
         self.target_temp = target_temp
         while True:
             notif = _thread.getnotification()
             if notif == _thread.EXIT:
-                # print('\nincubation_thrd: EXIT command received.')
                 self.p_EN.value(0)
                 self.p_BF.value(0)
                 self.interrupter()
-                # print('\ninterrupter is done')
                 return
 
             try:
-                self.current_temp = int(self._current_temp.read()[0])
-                if self.current_temp < int(self.target_temp - 2):
-                    # print('\ncurrent temperature {}C is below the targeted temperature {}C, stepper was shut down.'.format(self.current_temp, self.target_temp))
-                    if self.pwr.value():
-                        self.pwr.value(0)
+                self.current_temp = self._current_temp.read()
+                if self.current_temp != False:
+                    if self.current_temp[0] < int(self.target_temp - 3):
+                        if self.pwr.value():
+                            self.pwr.value(0)
+                            sleep(2)
+
+                        if self.blower == 'On':
+                            if not self.p_BF.value():
+                                self.p_BF.value(1)
+                                sleep(2)
+                        
+                        if not self.p_EN.value():
+                            self.p_EN.value(1)
+
+                        if self.p_PH.value():
+                            self.p_PH.value(0)
+                        sleep(5)
+
+                    elif self.current_temp[0] > int(self.target_temp + 3):
+                        if self.pwr.value():
+                            self.pwr.value(0)
+                            sleep(2)
+
+                        if self.blower == 'On':
+                            if not self.p_BF.value():
+                                self.p_BF.value(1)
+
+                        for pin in [self.p_EN, self.p_PH]:
+                            if not pin.value():
+                                pin.value(1)
+                        sleep(5)
+
+                    else:
+                        for pin in [self.p_EN, self.p_BF, self.p_PH]:
+                            pin.value(0)
                         sleep(3)
+                        self.dir.value(direction if direction in [0, 1] else 0)
+                        stepper.duty(duty)
+                        self.pwr.value(1)
+                        for idx, frequency in enumerate(ramp):
+                            if int(self.target_temp - 2) <= self.current_temp <= int(self.target_temp + 2):
+                                stepper.freq(frequency)
+                                sleeping_time = round((duration / sum(ramp)) * frequency, 3)
+                                sleep(sleeping_time)
+                                self.timer -= sleeping_time
+                                self.current_temp = int(self._current_temp.read()[0])
 
-                    if self.blower == 'On':
-                        if not self.p_BF.value():
-                            self.p_BF.value(1)
-                            # print('\nblower now turned ON in if statement.')
-
-                    for pin in [self.p_EN, self.p_PH]:
-                        if not pin.value():
-                            pin.value(1)
-
-                    # print('\nHEATING: p_EN and p_PH ')
-                    sleep(5)
-
-                elif self.current_temp > int(self.target_temp + 2):
-                    # print('\ncurrent temperature {}C is above the targeted temperature {}C, stepper was shut down.'.format(self.current_temp, self.target_temp))
-                    if self.pwr.value():
-                        self.pwr.value(0)
-                        sleep(3)
-
-                    if self.blower == 'On':
-                        if not self.p_BF.value():
-                            self.p_BF.value(1)
-                            # print('\nblower now turned ON in if statement.')
-
-                    if not self.p_EN.value():
-                        self.p_EN.value(1)
-                        # print('\npeltier now turned on in elif statement.')
-
-                    if self.p_PH.value():
-                        self.p_PH.value(0)
-
-                    # print('\nCOOLING: p_PH went down.')
-                    sleep(5)
-
-                else:
-                    # print('\ncurrent temperature is above and below the lower and higher thresholds.')
-                    for pin in [self.p_EN, self.p_BF, self.p_PH]:
-                        pin.value(0)
-                    # print("p_EN, p_BF, p_BH were all pulled down.")
-                    sleep(3)
-                    self.dir.value(direction if direction in [0, 1] else 0)
-                    stepper.duty(duty)
-                    self.pwr.value(1)
-                    # print('incubating...')
-                    # t = [35.1, 35.9, 37.3, 38.1, 37.6, 38.1, 38.5, 38.9, 39.1, 39.9, 40.1, 43, 43, 43]
-                    for idx, frequency in enumerate(ramp):
-                        if int(self.target_temp - 2) <= self.current_temp <= int(self.target_temp + 2):
-                            # print('stepper operates @{}Hz'.format(frequency))
-                            stepper.freq(frequency)
-                            sleeping_time = round((duration / sum(ramp)) * frequency, 3)
-                            # print('sleeping time: {}s ---- remaining time: {}s'.format(sleeping_time, self.timer))
-                            sleep(sleeping_time)
-                            self.timer -= sleeping_time
-                            self.current_temp = int(self._current_temp.read()[0])
-
-                            # self.current_temp = t[idx]
-                            # print('\ncurrent temperature during the incubation: {}C'.format(self.current_temp))
-
-                            if self.timer < 5:
-                                # print('remaining time is below 10s, exiting the thread.')
-                                stepper.deinit()
-                                # print('stepper deinitialised')
-                                self.interrupter()
-                                return "incubation is done.\n"
-                        else:
-                            # print('\ncurrent temperature is out of the targeted zone, shutting down the stepper.')
-                            # Stepper will be stopped in 10 seconds
-                            _ramp = ramp[idx+1:] if idx>len(ramp)/2 else ramp[idx-1::-1]
-                            for _frequency in _ramp:
-                                # stepper.freq(_frequency)
-                                sleep(round((10 / sum(_ramp)) * _frequency, 3))
-                            break
+                                if self.timer < 5:
+                                    stepper.deinit()
+                                    self.interrupter()
+                                    return "incubation is done.\n"
+                            else:
+                                # Stepper will be stopped in 10 seconds
+                                _ramp = ramp[idx+1:] if idx>len(ramp)/2 else ramp[idx-1::-1]
+                                for _frequency in _ramp:
+                                    sleep(round((10 / sum(_ramp)) * _frequency, 3))
+                                break
             except Exception as e:
+                for pin in [self.p_EN, self.p_BF, self.p_PH]:
+                    pin.value(0)
                 return e
 
     def sampling_thrd(self, direction=0, cycles=1, quiet_time=2.0, samples=3, acquisition_time=1, intervals=0.1, raw2avg=10, adc_read='Slow', pv=30):
@@ -387,8 +374,7 @@ class SamplingModule:
         if adc_read == 'Slow':
             sampler = DetectionModule(34,25,pv)
         else:
-            pass
-            # sampler = DetectionModule(39,25,pv)
+            sampler = DetectionModule(39,25,pv)
 
         while True:
             notif = _thread.getnotification()
@@ -438,19 +424,27 @@ class SamplingModule:
         self.dir.value(0)
         self.pwr.value(1)
         stepper = Pin(self.step_pin, Pin.OUT)
-        if not self.intrptr.value():
-            self.pwr.value(0)
-            # print(GREEN + "stepper has already been in point zero." + WHITE)
-            return
-        while True:
-            stepper.value(1)
-            sleep(0.02)
-            stepper.value(0)
-            # print("stepper is moving to the point zero.")
-            if not self.intrptr.value():
+        try:
+            if self.intrptr.value():
                 self.pwr.value(0)
-                break
-        return
+                # print(GREEN + "stepper has already been in point zero." + WHITE)
+                return
+            while True:
+                stepper.value(1)
+                sleep(0.005)
+                stepper.value(0)
+                # print("stepper is moving to the point zero.")
+                if self.intrptr.value():
+                    self.pwr.value(0)
+                    break
+            return
+        except KeyboardInterrupt:
+            self.pwr.value(0)
+            return 'aborted!'
+        except Exception as e:
+            print(e)
+            self.pwr.value(0)
+            return 'shutting down.'
 
 class DisplayModule:
     # pylint: disable=too-many-instance-attributes
@@ -458,6 +452,7 @@ class DisplayModule:
     def __init__(self):
         self.tft = TFT()
         self.tft.init(self.tft.ST7735R, speed=10000000, spihost=self.tft.VSPI, mosi=23, miso=19, clk=18, cs=5, dc=15,rst_pin=26, hastouch=False, bgr=False, width=128, height=128)
+        tft.init(tft.ST7735R, speed=10000000, spihost=tft.VSPI, mosi=23, miso=19, clk=18, cs=5, dc=15,rst_pin=26, hastouch=False, bgr=False, width=128, height=128)
         self.max_x, self.max_y = self.tft.screensize()
         self.init_x, self.init_y = 2, 3
         self.rtc = RTC()
