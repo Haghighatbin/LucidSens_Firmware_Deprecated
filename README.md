@@ -1,11 +1,8 @@
-# LucidSens
+# LucidSens (Deprecated)
 
 A device for electrochemiluminescence (ECL) measurements. 
 
-Licensed under XXX:
-
-Firmware: https://github.com/haghighatbin/LucidSens_Firmware.git
+Firmware: https://github.com/haghighatbin/LucidSens_Firmware.git <br />
 GUI: https://github.com/haghighatbin/LucidSens_GUI.git
 
-aminhb@tutanota.com
-"""
+Developed by aminhb@tutanota.com
